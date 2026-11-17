@@ -170,7 +170,7 @@ function connectLive(symbol,interval){
 }
 async function load(){
  const requestId=++loadSeq;
- let symbol=$('search').value.trim().toUpperCase().replace(/\\s+/g,'');
+ let symbol=$('search').value.trim().toUpperCase().replaceAll(' ','');
  if(symbol && !symbol.endsWith('USDT'))symbol+='USDT';
  const interval=$('tf').value;
  if(!/^[A-Z0-9]{5,25}$/.test(symbol)){log('Coin ka naam sahi likhein, misal BTC ya BTCUSDT');return}
