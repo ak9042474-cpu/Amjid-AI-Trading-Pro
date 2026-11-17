@@ -29,7 +29,7 @@ footer{display:none}
 <main>
 <div class="toolbar">
 <select id="market"><option value="spot">Spot</option><option value="futures">USDT-M Futures</option></select>
-<input id="search" placeholder="Search coin e.g. ETHUSDT" value="BTCUSDT">
+<input id="search" list="coinList" autocomplete="off" placeholder="Coin likhein: BTC / BTCUSDT" value="BTCUSDT"><datalist id="coinList"><option value="BTCUSDT"><option value="DOGEUSDT"><option value="NEARUSDT"><option value="SOLUSDT"><option value="ETHUSDT"><option value="BNBUSDT"><option value="XRPUSDT"><option value="ADAUSDT"><option value="LINKUSDT"><option value="AVAXUSDT"><option value="LTCUSDT"><option value="DOTUSDT"><option value="SUIUSDT"><option value="TRXUSDT"></datalist>
 <select id="tf"><option>5m</option><option selected>15m</option><option>1h</option><option>4h</option><option>1d</option><option>1w</option></select>
 <button id="load">Load chart</button><button id="refresh">Refresh</button>
 </div>
@@ -170,9 +170,10 @@ function connectLive(symbol,interval){
 }
 async function load(){
  const requestId=++loadSeq;
- const symbol=$('search').value.trim().toUpperCase();
+ let symbol=$('search').value.trim().toUpperCase().replace(/\\s+/g,'');
+ if(symbol && !symbol.endsWith('USDT'))symbol+='USDT';
  const interval=$('tf').value;
- if(!/^[A-Z0-9]{5,25}$/.test(symbol)){log('Binance coin symbol sahi likhein, misal BTCUSDT');return}
+ if(!/^[A-Z0-9]{5,25}$/.test(symbol)){log('Coin ka naam sahi likhein, misal BTC ya BTCUSDT');return}
  $('search').value=symbol;$('pairtitle').textContent=symbol+' · '+$('market').value+' · '+interval;
  $('connection').textContent='Binance data loading…';$('load').disabled=true;$('load').textContent='Loading…';
  try{
