@@ -139,7 +139,18 @@ function analyze(allBars){
  if(extremeLiquidity)mk.push({time:b[extremeLiquidity.i].time,position:'aboveBar',color:'#ff9d58',shape:'arrowDown',text:'EX-LIQ SWEEP'});
  if(shortConfirm)mk.push({time:b[shortConfirm.i].time,position:'aboveBar',color:'#f06475',shape:'arrowDown',text:'SHORT CONFIRM'});
  candles.setMarkers(mk);
- drawMap({bars:b,structure:latest,idm:idmPivot,idmState,extremeLiquidity,fvg:fvgZone,ob:obZone});
+ let tradePlan=null;
+ if(entryReady&&obZone){
+  const range=Math.max(obZone.high-obZone.low,last.close*0.001);
+  if(latest.type.startsWith('Bull')){
+   const entry=obZone.high,sl=obZone.low-range*0.15;
+   tradePlan={side:'BUY',entry,sl,tp:entry+(entry-sl)*1.5,rr:'1:1.5'};
+  }else{
+   const entry=obZone.low,sl=obZone.high+range*0.15;
+   tradePlan={side:'SELL',entry,sl,tp:entry-(sl-entry)*1.5,rr:'1:1.5'};
+  }
+ }
+ drawMap({bars:b,structure:latest,idm:idmPivot,idmState,extremeLiquidity,fvg:fvgZone,ob:obZone,trade:tradePlan});
 }
 
 function drawMap(map){
@@ -168,9 +179,25 @@ function drawMap(map){
  if(map.structure){const p=map.bars[map.structure.i];addLevel(map.structure.price,p?.time,map.structure.type,map.structure.type.includes('Bull')?'#22c58b':'#f06475');}
  if(map.idm){const p=map.bars[map.idm.i];addLevel(map.idm.price,p?.time,'IDM','#e6bd55');}
  if(map.idmState)addLevel(map.idmState.price,map.bars[map.idmState.i]?.time,map.idmState.kind,'#e6bd55');
- if(map.extremeLiquidity)addLevel(map.extremeLiquidity.price,map.bars[map.extremeLiquidity.i]?.time,'EXTREME LIQUIDITY / SL','#ff9d58');
+ if(map.extremeLiquidity)addLevel(map.extremeLiquidity.price,map.bars[map.extremeLiquidity.i]?.time,'EXTREME LIQUIDITY','#ff9d58');
  addZone(map.fvg,'FVG',map.fvg?.side==='bull'?'#70a5ff':'#f06475');
  addZone(map.ob,'ORDER BLOCK',map.ob?.side==='bull'?'#c08cff':'#e6a15a');
+ if(map.trade){
+  const t=map.trade, color=t.side==='BUY'?'#22c58b':'#f06475';
+  addLevel(t.entry,null,t.side+' ENTRY',color);
+  addLevel(t.sl,null,'STOP LOSS','#f06475');
+  addLevel(t.tp,null,'TAKE PROFIT · RR 1:1.5','#22c58b');
+  const yEntry=candles.priceToCoordinate(t.entry),ySL=candles.priceToCoordinate(t.sl),yTP=candles.priceToCoordinate(t.tp);
+  if(yEntry!==null&&ySL!==null&&yTP!==null){
+   const left=Math.max(8,Math.min(timeScale.timeToCoordinate(map.bars.at(-1).time)??8,plotRight-8));
+   const drawRisk=(a,b,label,bg)=>{
+    const top=Math.max(0,Math.min(a,b)),bottom=Math.min(plotBottom,Math.max(a,b));
+    if(bottom-top<2)return;
+    const z=document.createElement('div');z.className='map-zone';z.style.left=left+'px';z.style.top=top+'px';z.style.width=Math.max(8,plotRight-left)+'px';z.style.height=(bottom-top)+'px';z.style.background=bg;z.style.borderColor=bg;z.style.opacity='.18';layer.appendChild(z);
+   };
+   drawRisk(yEntry,yTP,'TARGET','#22c58b');drawRisk(yEntry,ySL,'RISK','#f06475');
+  }
+ }
 }
 
 function stopSocket(){if(socket){socket.onclose=null;socket.close();socket=null}}
