@@ -14,7 +14,7 @@ h1{font-size:19px;margin:0}header small{color:var(--muted)}main{max-width:1450px
 select,input,button{background:#0c1426;color:var(--text);border:1px solid #34425d;border-radius:8px;padding:10px;font:inherit}
 input{min-width:130px;flex:1}button{cursor:pointer}button.active{border-color:var(--blue);background:#1b3154}
 .layout{display:block}.chartbox{min-width:0}aside.panel{display:none}
-#chart{height:530px;width:100%}.chart-head{display:flex;justify-content:space-between;gap:10px;padding:5px 2px 12px;flex-wrap:wrap}
+#chart{height:530px;width:100%;position:relative}#drawings{position:absolute;inset:0;z-index:5;pointer-events:none;overflow:hidden}.map-line{position:absolute;height:0;border-top:1px dashed;opacity:.95}.map-tag{position:absolute;right:62px;transform:translateY(-100%);font-size:10px;font-weight:700;padding:2px 5px;border-radius:3px;white-space:nowrap;background:#10192b}.map-zone{position:absolute;border:1px solid;border-radius:3px;opacity:.22}.map-zone-label{position:absolute;font-size:10px;font-weight:700;padding:2px 4px;background:#10192b;border-radius:3px;white-space:nowrap}.chart-head{display:flex;justify-content:space-between;gap:10px;padding:5px 2px 12px;flex-wrap:wrap}
 .panel h2{font-size:15px;margin:0 0 12px}.metric{padding:10px 0;border-bottom:1px solid var(--line)}.metric:last-child{border:0}
 .metric span{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}.metric strong{font-size:14px;overflow-wrap:anywhere}
 .status{display:inline-block;padding:5px 9px;border-radius:7px;background:#453b20;color:#ffd477;font-weight:700}
@@ -29,12 +29,12 @@ footer{display:none}
 <main>
 <div class="toolbar">
 <select id="market"><option value="spot">Spot</option><option value="futures">USDT-M Futures</option></select>
-<input id="search" placeholder="Search coin e.g. ETHUSDT" value="BTCUSDT"><select id="symbolSelect" aria-label="Select Binance pair"><option>Loading pairs…</option></select>
+<input id="search" placeholder="Search coin e.g. ETHUSDT" value="BTCUSDT">
 <select id="tf"><option>5m</option><option selected>15m</option><option>1h</option><option>4h</option><option>1d</option><option>1w</option></select>
 <button id="load">Load chart</button><button id="refresh">Refresh</button>
 </div>
 <div class="layout">
-<section class="panel chartbox"><div class="chart-head"><strong id="pairtitle">BTCUSDT · Spot · 15m</strong><span id="price">—</span></div><div id="chart"></div></section>
+<section class="panel chartbox"><div class="chart-head"><strong id="pairtitle">BTCUSDT · Spot · 15m</strong><span id="price">—</span></div><div id="chart"><div id="drawings"></div></div></section>
 <aside class="panel"><h2>Market structure</h2>
 <div class="metric"><span>Current status</span><strong class="status" id="signal">WAIT / NO TRADE</strong></div>
 <div class="metric"><span>Trend context</span><strong id="trend">Calculating…</strong></div>
@@ -116,7 +116,38 @@ function analyze(allBars){
  if(obZone)mk.push({time:b[obZone.i].time,position:obZone.side==='bull'?'belowBar':'aboveBar',color:'#c08cff',shape:'circle',text:'OB'});
  if(entryReady)mk.push({time:last.time,position:latest.type.startsWith('Bull')?'belowBar':'aboveBar',color:latest.type.startsWith('Bull')?'#22c58b':'#f06475',shape:'arrowUp',text:'ENTRY'});
  candles.setMarkers(mk);
+ drawMap({bars:b,structure:latest,idm:idmPivot,fvg:fvgZone,ob:obZone});
 }
+
+function drawMap(map){
+ const layer=$('drawings');layer.innerHTML='';
+ const width=$('chart').clientWidth,height=$('chart').clientHeight;
+ const plotRight=width-64,plotBottom=height-28;
+ const timeScale=chart.timeScale();
+ function addLevel(price,startTime,label,color){
+  if(!Number.isFinite(price))return;
+  const y=candles.priceToCoordinate(price);if(y===null||y<0||y>plotBottom)return;
+  const x0=startTime?timeScale.timeToCoordinate(startTime):null;
+  const line=document.createElement('div');line.className='map-line';line.style.left=Math.max(8,Math.min(x0??8,plotRight-8))+'px';line.style.width=Math.max(8,plotRight-Math.max(8,Math.min(x0??8,plotRight-8)))+'px';line.style.top=y+'px';line.style.borderColor=color;layer.appendChild(line);
+  const tag=document.createElement('div');tag.className='map-tag';tag.textContent=label+' · '+Number(price).toFixed(2);tag.style.top=y+'px';tag.style.color=color;layer.appendChild(tag);
+ }
+ function addZone(zone,label,color){
+  if(!zone)return;
+  const y1=candles.priceToCoordinate(zone.high),y2=candles.priceToCoordinate(zone.low);
+  const x1=timeScale.timeToCoordinate(map.bars[zone.i]?.time);
+  if(y1===null||y2===null||x1===null||!Number.isFinite(y1)||!Number.isFinite(y2))return;
+  const top=Math.max(0,Math.min(y1,y2)),bottom=Math.min(plotBottom,Math.max(y1,y2));
+  const left=Math.max(0,Math.min(x1,plotRight-5));
+  if(bottom-top<2||left>=plotRight)return;
+  const box=document.createElement('div');box.className='map-zone';box.style.left=left+'px';box.style.top=top+'px';box.style.width=(plotRight-left)+'px';box.style.height=(bottom-top)+'px';box.style.borderColor=color;box.style.background=color;layer.appendChild(box);
+  const tag=document.createElement('div');tag.className='map-zone-label';tag.textContent=label;tag.style.left=(left+3)+'px';tag.style.top=Math.max(2,top+2)+'px';tag.style.color=color;layer.appendChild(tag);
+ }
+ if(map.structure){const p=map.bars[map.structure.i];addLevel(map.structure.price,p?.time,map.structure.type,map.structure.type.includes('Bull')?'#22c58b':'#f06475');}
+ if(map.idm){const p=map.bars[map.idm.i];addLevel(map.idm.price,p?.time,'IDM','#e6bd55');}
+ addZone(map.fvg,'FVG',map.fvg?.side==='bull'?'#70a5ff':'#f06475');
+ addZone(map.ob,'ORDER BLOCK',map.ob?.side==='bull'?'#c08cff':'#e6a15a');
+}
+
 function stopSocket(){if(socket){socket.onclose=null;socket.close();socket=null}}
 function connectLive(symbol,interval){
  stopSocket();
