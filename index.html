@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Amjid AI Trading Pro</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+:root{color-scheme:dark;--bg:#0b1020;--panel:#121a2d;--line:#26334d;--muted:#93a4bf;--text:#eef4ff;--green:#22c58b;--red:#f06475;--blue:#70a5ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,Segoe UI,sans-serif}
+header{padding:17px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
+h1{font-size:19px;margin:0}header small{color:var(--muted)}main{max-width:1450px;margin:auto;padding:16px}
+.toolbar,.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+.toolbar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+select,input,button{background:#0c1426;color:var(--text);border:1px solid #34425d;border-radius:8px;padding:10px;font:inherit}
+input{min-width:130px;flex:1}button{cursor:pointer}button.active{border-color:var(--blue);background:#1b3154}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px}.chartbox{min-width:0}
+#chart{height:530px;width:100%}.chart-head{display:flex;justify-content:space-between;gap:10px;padding:5px 2px 12px;flex-wrap:wrap}
+.panel h2{font-size:15px;margin:0 0 12px}.metric{padding:10px 0;border-bottom:1px solid var(--line)}.metric:last-child{border:0}
+.metric span{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}.metric strong{font-size:14px;overflow-wrap:anywhere}
+.status{display:inline-block;padding:5px 9px;border-radius:7px;background:#453b20;color:#ffd477;font-weight:700}
+.note{color:var(--muted);font-size:12px;line-height:1.5;margin-top:12px}
+#log{max-height:170px;overflow:auto;color:var(--muted);font-size:12px;line-height:1.7}
+footer{color:var(--muted);font-size:12px;padding:18px 2px}
+@media(max-width:850px){.layout{grid-template-columns:1fr}#chart{height:420px}main{padding:10px}}
+</style>
+</head>
+<body>
+<header><div><h1>Amjid AI Trading Pro</h1><small>ICT · Advanced SMC · Price Action | Analysis only</small></div><small id="connection">Connecting to Binance public data…</small></header>
+<main>
+<div class="toolbar">
+<select id="market"><option value="spot">Spot</option><option value="futures">USDT-M Futures</option></select>
+<input id="search" placeholder="Search pair e.g. BTCUSDT" value="BTCUSDT" list="pairs"><datalist id="pairs"></datalist>
+<select id="tf"><option>5m</option><option selected>15m</option><option>1h</option><option>4h</option><option>1d</option><option>1w</option></select>
+<button id="load">Load chart</button><button id="refresh">Refresh</button>
+</div>
+<div class="layout">
+<section class="panel chartbox"><div class="chart-head"><strong id="pairtitle">BTCUSDT · Spot · 15m</strong><span id="price">—</span></div><div id="chart"></div></section>
+<aside class="panel"><h2>Market structure</h2>
+<div class="metric"><span>Current status</span><strong class="status" id="signal">WAIT / NO TRADE</strong></div>
+<div class="metric"><span>Trend context</span><strong id="trend">Calculating…</strong></div>
+<div class="metric"><span>Latest structure event</span><strong id="structure">—</strong></div>
+<div class="metric"><span>External swing high</span><strong id="swh">—</strong></div>
+<div class="metric"><span>External swing low</span><strong id="swl">—</strong></div>
+<div class="metric"><span>Method</span><strong>5-bar confirmed pivots</strong></div>
+<p class="note">BOS/CHoCH labels are preliminary close-confirmed swing-break observations. IDM, liquidity sweeps, order blocks, FVG, entry, stop-loss and targets are not yet validated in this MVP. No trade signal is issued.</p>
+<h2 style="margin-top:18px">Activity</h2><div id="log">Waiting for market data…</div>
+</aside></div>
+<footer>Public Binance market data only. No API keys, no order execution. Educational analysis; not financial advice. Confirm all levels independently before trading.</footer>
+</main>
+<script>
+const $=id=>document.getElementById(id);let chart,candles,markers=[],lastBars=[];
+function log(s){$('log').innerHTML=(new Date().toLocaleTimeString()+' — '+s+'<br>')+$('log').innerHTML}
+function endpoints(){return $('market').value==='spot'?{info:'https://api.binance.com/api/v3/exchangeInfo',klines:'https://api.binance.com/api/v3/klines'}:{info:'https://fapi.binance.com/fapi/v1/exchangeInfo',klines:'https://fapi.binance.com/fapi/v1/klines'}}
+function initChart(){chart=LightweightCharts.createChart($('chart'),{layout:{background:{color:'#121a2d'},textColor:'#b8c7df'},grid:{vertLines:{color:'#202b40'},horzLines:{color:'#202b40'}},rightPriceScale:{borderColor:'#34425d'},timeScale:{borderColor:'#34425d',timeVisible:true,secondsVisible:false},crosshair:{mode:1}});candles=chart.addCandlestickSeries({upColor:'#22c58b',downColor:'#f06475',borderUpColor:'#22c58b',borderDownColor:'#f06475',wickUpColor:'#22c58b',wickDownColor:'#f06475'});new ResizeObserver(()=>chart.applyOptions({width:$('chart').clientWidth})).observe($('chart'))}
+async function loadPairs(){try{const r=await fetch(endpoints().info);if(!r.ok)throw Error('Binance pair list HTTP '+r.status);const j=await r.json();const syms=j.symbols.filter(x=>x.status==='TRADING'&&( $('market').value==='spot'?x.isSpotTradingAllowed:x.contractType==='PERPETUAL'&&x.quoteAsset==='USDT')).map(x=>x.symbol).sort();$('pairs').innerHTML=syms.map(x=>'<option value="'+x+'">').join('');$('connection').textContent=syms.length+' Binance pairs available';log('Loaded '+syms.length+' symbols');}catch(e){$('connection').textContent='Pair list unavailable';log(e.message)}}
+function pivots(bars,n=5){let highs=[],lows=[];for(let i=n;i<bars.length-n;i++){let hi=true,lo=true;for(let k=i-n;k<=i+n;k++){if(k===i)continue;if(bars[k].high>=bars[i].high)hi=false;if(bars[k].low<=bars[i].low)lo=false}if(hi)highs.push({i,price:bars[i].high});if(lo)lows.push({i,price:bars[i].low})}return{highs,lows}}
+function analyze(b){const p=pivots(b),last=b[b.length-1],prev=b[b.length-2];let sh=p.highs.at(-1),sl=p.lows.at(-1),event='No confirmed break';if(sh&&prev.close<=sh.price&&last.close>sh.price)event='Bullish structure break (close above swing high)';if(sl&&prev.close>=sl.price&&last.close<sl.price)event='Bearish structure break (close below swing low)';$('trend').textContent=last.close> b[Math.max(0,b.length-20)].close?'Short-term upward':'Short-term downward';$('structure').textContent=event;$('swh').textContent=sh?sh.price.toPrecision(8):'Not confirmed';$('swl').textContent=sl?sl.price.toPrecision(8):'Not confirmed';$('signal').textContent='WAIT / NO TRADE';let mk=[];if(sh)mk.push({time:b[sh.i].time,position:'aboveBar',color:'#70a5ff',shape:'circle',text:'Swing H'});if(sl)mk.push({time:b[sl.i].time,position:'belowBar',color:'#70a5ff',shape:'circle',text:'Swing L'});if(event!=='No confirmed break'){mk.push({time:last.time,position:event.startsWith('Bull')?'aboveBar':'belowBar',color:event.startsWith('Bull')?'#22c58b':'#f06475',shape:'arrowDown',text:event.startsWith('Bull')?'BOS?':'BOS?'});log(event)}candles.setMarkers(mk)}
+async function load(){const symbol=$('search').value.trim().toUpperCase(),tf=$('tf').value;if(!/^[A-Z0-9]{5,20}$/.test(symbol)){log('Enter a valid Binance symbol');return} $('pairtitle').textContent=symbol+' · '+$('market').value+' · '+tf;try{const u=endpoints().klines+'?symbol='+encodeURIComponent(symbol)+'&interval='+tf+'&limit=500';const r=await fetch(u);if(!r.ok)throw Error('Kline request failed: '+r.status);const raw=await r.json();if(!Array.isArray(raw)||!raw.length)throw Error('No candle data returned');lastBars=raw.map(x=>({time:Math.floor(x[0]/1000),open:+x[1],high:+x[2],low:+x[3],close:+x[4]}));candles.setData(lastBars);chart.timeScale().fitContent();const q=lastBars.at(-1);$('price').textContent='Close: '+q.close;$('connection').textContent='Live public data loaded';analyze(lastBars);log('Loaded '+lastBars.length+' candles for '+symbol)}catch(e){$('connection').textContent='Data request failed';log(e.message)}}
+$('load').onclick=load;$('refresh').onclick=load;$('market').onchange=()=>{loadPairs();load()};$('tf').onchange=load;initChart();loadPairs().then(load);
+</script>
+</body></html>
