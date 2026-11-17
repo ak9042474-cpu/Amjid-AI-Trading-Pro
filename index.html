@@ -62,22 +62,22 @@ function pivots(bars,n=5){let highs=[],lows=[];for(let i=n;i<bars.length-n;i++){
 function analyze(b){
  const ext=pivots(b,5), intr=pivots(b,2), last=b[b.length-1];
  let bias=0, latest=null, protectedLow=null, protectedHigh=null, usedHigh=-1, usedLow=-1;
- // Walk forward in time. A pivot is usable only after its right-side confirmation candles have closed.
+ // External pivots become usable only after five right-side candles have closed.
  for(let i=12;i<b.length;i++){
   const hs=ext.highs.filter(x=>x.confirmedAt<i), ls=ext.lows.filter(x=>x.confirmedAt<i);
   const h=hs.at(-1), l=ls.at(-1);
-  if(h&&h.i!==usedHigh&&b[i-1].close<=h.price&&b[i].close>h.price){
-   const isChange=bias===-1;
-   latest={i,type:isChange?'Bullish CHoCH':'Bullish BOS',price:h.price};
-   bias=1; usedHigh=h.i;
-   // Once bullish structure is established, the last confirmed opposing swing low is protected.
-   protectedLow=l||protectedLow;
-  }
-  if(l&&l.i!==usedLow&&b[i-1].close>=l.price&&b[i].close<l.price){
-   const isChange=bias===1;
-   latest={i,type:isChange?'Bearish CHoCH':'Bearish BOS',price:l.price};
-   bias=-1; usedLow=l.i;
-   protectedHigh=h||protectedHigh;
+  if(bias===1&&l&&(!protectedLow||l.confirmedAt>protectedLow.confirmedAt)&&l.price>protectedLow.price)protectedLow=l;
+  if(bias===-1&&h&&(!protectedHigh||h.confirmedAt>protectedHigh.confirmedAt)&&h.price<protectedHigh.price)protectedHigh=h;
+  const bullBreak=h&&h.i!==usedHigh&&b[i-1].close<=h.price&&b[i].close>h.price;
+  const bearBreak=l&&l.i!==usedLow&&b[i-1].close>=l.price&&b[i].close<l.price;
+  if(bias===1&&protectedLow&&b[i-1].close>=protectedLow.price&&b[i].close<protectedLow.price){
+   latest={i,type:'Bearish CHoCH',price:protectedLow.price};bias=-1;protectedHigh=h||protectedHigh;usedLow=l?l.i:usedLow;
+  }else if(bias===-1&&protectedHigh&&b[i-1].close<=protectedHigh.price&&b[i].close>protectedHigh.price){
+   latest={i,type:'Bullish CHoCH',price:protectedHigh.price};bias=1;protectedLow=l||protectedLow;usedHigh=h?h.i:usedHigh;
+  }else if(bias!==-1&&bullBreak){
+   latest={i,type:'Bullish BOS',price:h.price};bias=1;protectedLow=l||protectedLow;usedHigh=h.i;
+  }else if(bias!==1&&bearBreak){
+   latest={i,type:'Bearish BOS',price:l.price};bias=-1;protectedHigh=h||protectedHigh;usedLow=l.i;
   }
  }
  const sh=ext.highs.filter(x=>x.confirmedAt<b.length).at(-1), sl=ext.lows.filter(x=>x.confirmedAt<b.length).at(-1);
@@ -93,10 +93,9 @@ function analyze(b){
  $('structure').textContent=latest?latest.type+' at '+latest.price.toPrecision(8):'No confirmed BOS / CHoCH';
  $('swh').textContent=sh?sh.price.toPrecision(8):'Not confirmed';$('swl').textContent=sl?sl.price.toPrecision(8):'Not confirmed';
  $('internal').textContent='Internal high: '+(ih?ih.price.toPrecision(7):'—')+' | low: '+(il?il.price.toPrecision(7):'—');
- $('sweep').textContent=sweep;
- $('idm').textContent='Not confirmed — internal swing liquidity only; needs POI and sweep context';
+ $('sweep').textContent=sweep;$('idm').textContent='Not confirmed — needs internal liquidity, POI and sweep context';
  $('fvg').textContent=fvg;$('ob').textContent=ob;$('signal').textContent='WAIT / NO TRADE';
- // Keep the chart clean: no labels on every swing. BOS/CHoCH appears only on the actual confirmed break candle.
+ // Chart markers are placed only on actual break/sweep candles, never on every swing point.
  let mk=[];
  if(latest)mk.push({time:b[latest.i].time,position:latest.type.startsWith('Bull')?'belowBar':'aboveBar',color:latest.type.startsWith('Bull')?'#22c58b':'#f06475',shape:latest.type.includes('CHoCH')?'arrowUp':'arrowDown',text:latest.type});
  if(sweepObj)mk.push(sweepObj);if(fvgObj)mk.push(fvgObj);if(obObj)mk.push(obObj);
