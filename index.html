@@ -30,7 +30,7 @@ footer{display:none}
 <div class="toolbar">
 <select id="market"><option value="spot">Spot</option><option value="futures">USDT-M Futures</option></select>
 <input id="search" list="coinList" autocomplete="off" placeholder="Coin likhein: BTC / BTCUSDT" value="BTCUSDT"><datalist id="coinList"><option value="BTCUSDT"><option value="DOGEUSDT"><option value="NEARUSDT"><option value="SOLUSDT"><option value="ETHUSDT"><option value="BNBUSDT"><option value="XRPUSDT"><option value="ADAUSDT"><option value="LINKUSDT"><option value="AVAXUSDT"><option value="LTCUSDT"><option value="DOTUSDT"><option value="SUIUSDT"><option value="TRXUSDT"></datalist>
-<select id="tf"><option>5m</option><option selected>15m</option><option>1h</option><option>4h</option><option>1d</option><option>1w</option></select>
+<select id="tf"><option>1m</option><option>5m</option><option selected>15m</option><option>30m</option><option>1h</option><option>4h</option><option>1d</option><option>1w</option></select>
 <button id="load">Load chart</button><button id="refresh">Refresh</button>
 </div>
 <div class="layout">
@@ -115,8 +115,31 @@ function analyze(allBars){
  if(fvgZone)mk.push({time:b[fvgZone.i].time,position:fvgZone.side==='bull'?'belowBar':'aboveBar',color:'#70a5ff',shape:'square',text:'FVG'});
  if(obZone)mk.push({time:b[obZone.i].time,position:obZone.side==='bull'?'belowBar':'aboveBar',color:'#c08cff',shape:'circle',text:'OB'});
  if(entryReady)mk.push({time:last.time,position:latest.type.startsWith('Bull')?'belowBar':'aboveBar',color:latest.type.startsWith('Bull')?'#22c58b':'#f06475',shape:'arrowUp',text:'ENTRY'});
+
+ // GUARDEER notes: keep IDM liquidity, wick-only raid, body-close break and extreme-liquidity sweep distinct.
+ const swingHighs=st.highs.filter(x=>x.confirmedAt<b.length);
+ const swingLows=st.lows.filter(x=>x.confirmedAt<b.length);
+ const recentHigh=swingHighs.at(-1),recentLow=swingLows.at(-1);
+ let idmState=null,extremeLiquidity=null,shortConfirm=null;
+ if(recentLow){
+  const tail=b.slice(-3),p=recentLow.price,lastBar=b.at(-1),prevBar=b.at(-2);
+  if(lastBar.low<p&&lastBar.close>=p)idmState={kind:'WICK ONLY — NO HTF ENTRY',price:p,i:b.length-1,side:'low'};
+  else if(lastBar.close<p)idmState={kind:'BODY CLOSE BELOW IDM',price:p,i:b.length-1,side:'low'};
+ }
+ if(recentHigh&&obZone){
+  const nearBars=b.slice(Math.max(0,obZone.i-4),Math.min(b.length,obZone.i+8));
+  const nearbyHigh=nearBars.filter(x=>x.high>=recentHigh.price).length>0;
+  const prev=b.at(-2),lastBar=b.at(-1);
+  if(nearbyHigh&&lastBar.high>recentHigh.price&&lastBar.close<recentHigh.price){
+   extremeLiquidity={price:recentHigh.price,i:b.length-1};
+   if(prev&&lastBar.close<prev.low)shortConfirm={entry:recentHigh.price,stop:recentHigh.price,i:b.length-1};
+  }
+ }
+ if(idmState)mk.push({time:b[idmState.i].time,position:idmState.side==='low'?'belowBar':'aboveBar',color:'#e6bd55',shape:'circle',text:idmState.kind});
+ if(extremeLiquidity)mk.push({time:b[extremeLiquidity.i].time,position:'aboveBar',color:'#ff9d58',shape:'arrowDown',text:'EX-LIQ SWEEP'});
+ if(shortConfirm)mk.push({time:b[shortConfirm.i].time,position:'aboveBar',color:'#f06475',shape:'arrowDown',text:'SHORT CONFIRM'});
  candles.setMarkers(mk);
- drawMap({bars:b,structure:latest,idm:idmPivot,fvg:fvgZone,ob:obZone});
+ drawMap({bars:b,structure:latest,idm:idmPivot,idmState,extremeLiquidity,fvg:fvgZone,ob:obZone});
 }
 
 function drawMap(map){
@@ -144,6 +167,8 @@ function drawMap(map){
  }
  if(map.structure){const p=map.bars[map.structure.i];addLevel(map.structure.price,p?.time,map.structure.type,map.structure.type.includes('Bull')?'#22c58b':'#f06475');}
  if(map.idm){const p=map.bars[map.idm.i];addLevel(map.idm.price,p?.time,'IDM','#e6bd55');}
+ if(map.idmState)addLevel(map.idmState.price,map.bars[map.idmState.i]?.time,map.idmState.kind,'#e6bd55');
+ if(map.extremeLiquidity)addLevel(map.extremeLiquidity.price,map.bars[map.extremeLiquidity.i]?.time,'EXTREME LIQUIDITY / SL','#ff9d58');
  addZone(map.fvg,'FVG',map.fvg?.side==='bull'?'#70a5ff':'#f06475');
  addZone(map.ob,'ORDER BLOCK',map.ob?.side==='bull'?'#c08cff':'#e6a15a');
 }
