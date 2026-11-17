@@ -39,15 +39,17 @@ footer{color:var(--muted);font-size:12px;padding:18px 2px}
 <div class="metric"><span>Current status</span><strong class="status" id="signal">WAIT / NO TRADE</strong></div>
 <div class="metric"><span>Trend context</span><strong id="trend">Calculating…</strong></div>
 <div class="metric"><span>Latest structure event</span><strong id="structure">—</strong></div>
-<div class="metric"><span>External swing high</span><strong id="swh">—</strong></div>
-<div class="metric"><span>External swing low</span><strong id="swl">—</strong></div>
+<div class="metric"><span>Intermediate Term High (ITH)</span><strong id="ith">—</strong></div>
+<div class="metric"><span>Intermediate Term Low (ITL)</span><strong id="itl">—</strong></div>
+<div class="metric"><span>Long Term High / Low</span><strong id="lt">—</strong></div>
+<div class="metric"><span>Latest Short Term High / Low</span><strong id="st">—</strong></div>
 <div class="metric"><span>Internal structure</span><strong id="internal">—</strong></div>
 <div class="metric"><span>Liquidity sweep</span><strong id="sweep">—</strong></div>
 <div class="metric"><span>IDM</span><strong id="idm">—</strong></div>
 <div class="metric"><span>FVG</span><strong id="fvg">—</strong></div>
 <div class="metric"><span>Order block</span><strong id="ob">—</strong></div>
-<div class="metric"><span>Method</span><strong>External 5-bar / Internal 2-bar pivots</strong></div>
-<p class="note">Structure, sweep, IDM, FVG aur OB labels educational candidates hain. IDM/OB ki definitions market ke mutabiq farq kar sakti hain. Abhi automatic entry, SL aur TP issue nahi hotay. Sirf confirmed closed candles analyze hoti hain.</p>
+<div class="metric"><span>Method</span><strong>STH/STL → ITH/ITL → LTH/LTL; close-confirmed breaks</strong></div>
+<p class="note">ICT mapping: STH/STL se ITH/ITL aur phir LTH/LTL classify hotay hain. BOS/CHoCH sirf confirmed intermediate swing ke candle-close break par. HTF narrative aur LTF entry ki full multi-timeframe confirmation abhi aglay development phase mein hai. IDM, FVG aur OB ko jab tak context validate na ho candidate hi dikhaya jayega.</p>
 <h2 style="margin-top:18px">Activity</h2><div id="log">Waiting for market data…</div>
 </aside></div>
 <footer>Public Binance market data only. No API keys, no order execution. Educational analysis; not financial advice. Confirm all levels independently before trading.</footer>
@@ -60,45 +62,65 @@ function initChart(){chart=LightweightCharts.createChart($('chart'),{layout:{bac
 async function loadPairs(){try{const r=await fetch(endpoints().info);if(!r.ok)throw Error('Binance pair list HTTP '+r.status);const j=await r.json();const syms=j.symbols.filter(x=>x.status==='TRADING'&&($('market').value==='spot'?x.isSpotTradingAllowed:(x.contractType==='PERPETUAL'&&x.quoteAsset==='USDT'))).map(x=>x.symbol).sort();$('symbolSelect').innerHTML=syms.map(x=>'<option value="'+x+'">'+x+'</option>').join('');if(syms.includes($('search').value.toUpperCase()))$('symbolSelect').value=$('search').value.toUpperCase();else $('symbolSelect').value=syms.includes('BTCUSDT')?'BTCUSDT':(syms[0]||'');$('search').value=$('symbolSelect').value;$('connection').textContent=syms.length+' Binance pairs loaded';log('Loaded '+syms.length+' tradable pairs');}catch(e){$('connection').textContent='Pair list unavailable';log(e.message)}}
 function pivots(bars,n=5){let highs=[],lows=[];for(let i=n;i<bars.length-n;i++){let hi=true,lo=true;for(let k=i-n;k<=i+n;k++){if(k===i)continue;if(bars[k].high>=bars[i].high)hi=false;if(bars[k].low<=bars[i].low)lo=false}if(hi)highs.push({i,confirmedAt:i+n,price:bars[i].high});if(lo)lows.push({i,confirmedAt:i+n,price:bars[i].low})}return{highs,lows}}
 function analyze(b){
- const ext=pivots(b,5), intr=pivots(b,2), last=b[b.length-1];
- let bias=0, latest=null, protectedLow=null, protectedHigh=null, usedHigh=-1, usedLow=-1;
- // External pivots become usable only after five right-side candles have closed.
- for(let i=12;i<b.length;i++){
-  const hs=ext.highs.filter(x=>x.confirmedAt<i), ls=ext.lows.filter(x=>x.confirmedAt<i);
+ // ICT nested swing hierarchy: STH/STL -> ITH/ITL -> LTH/LTL.
+ // A pivot is usable only after its right-side confirmation candle has closed.
+ const st=pivots(b,1);
+ function intermediate(list,isHigh){
+  const out=[];
+  for(let i=1;i<list.length-1;i++){
+   const ok=isHigh?(list[i].price>list[i-1].price&&list[i].price>list[i+1].price):(list[i].price<list[i-1].price&&list[i].price<list[i+1].price);
+   if(ok)out.push({...list[i],confirmedAt:list[i+1].confirmedAt});
+  }
+  return out;
+ }
+ const ith=intermediate(st.highs,true), itl=intermediate(st.lows,false);
+ const lth=intermediate(ith,true), ltl=intermediate(itl,false);
+ let bias=0, latest=null, usedHigh=-1, usedLow=-1;
+ for(let i=2;i<b.length;i++){
+  const hs=ith.filter(x=>x.confirmedAt<i), ls=itl.filter(x=>x.confirmedAt<i);
   const h=hs.at(-1), l=ls.at(-1);
-  if(bias===1&&l&&(!protectedLow||l.confirmedAt>protectedLow.confirmedAt)&&l.price>protectedLow.price)protectedLow=l;
-  if(bias===-1&&h&&(!protectedHigh||h.confirmedAt>protectedHigh.confirmedAt)&&h.price<protectedHigh.price)protectedHigh=h;
-  const bullBreak=h&&h.i!==usedHigh&&b[i-1].close<=h.price&&b[i].close>h.price;
-  const bearBreak=l&&l.i!==usedLow&&b[i-1].close>=l.price&&b[i].close<l.price;
-  if(bias===1&&protectedLow&&b[i-1].close>=protectedLow.price&&b[i].close<protectedLow.price){
-   latest={i,type:'Bearish CHoCH',price:protectedLow.price};bias=-1;protectedHigh=h||protectedHigh;usedLow=l?l.i:usedLow;
-  }else if(bias===-1&&protectedHigh&&b[i-1].close<=protectedHigh.price&&b[i].close>protectedHigh.price){
-   latest={i,type:'Bullish CHoCH',price:protectedHigh.price};bias=1;protectedLow=l||protectedLow;usedHigh=h?h.i:usedHigh;
-  }else if(bias!==-1&&bullBreak){
-   latest={i,type:'Bullish BOS',price:h.price};bias=1;protectedLow=l||protectedLow;usedHigh=h.i;
-  }else if(bias!==1&&bearBreak){
-   latest={i,type:'Bearish BOS',price:l.price};bias=-1;protectedHigh=h||protectedHigh;usedLow=l.i;
+  if(!h&&!l)continue;
+  const bull=h&&h.i!==usedHigh&&b[i-1].close<=h.price&&b[i].close>h.price;
+  const bear=l&&l.i!==usedLow&&b[i-1].close>=l.price&&b[i].close<l.price;
+  if(bias===0){
+   if(bull){latest={i,type:'Bullish MSS / BMS',price:h.price};bias=1;usedHigh=h.i;}
+   else if(bear){latest={i,type:'Bearish MSS / BMS',price:l.price};bias=-1;usedLow=l.i;}
+  }else if(bias===1){
+   if(bear){latest={i,type:'Bearish CHoCH',price:l.price};bias=-1;usedLow=l.i;}
+   else if(bull){latest={i,type:'Bullish BOS',price:h.price};usedHigh=h.i;}
+  }else{
+   if(bull){latest={i,type:'Bullish CHoCH',price:h.price};bias=1;usedHigh=h.i;}
+   else if(bear){latest={i,type:'Bearish BOS',price:l.price};usedLow=l.i;}
   }
  }
- const sh=ext.highs.filter(x=>x.confirmedAt<b.length).at(-1), sl=ext.lows.filter(x=>x.confirmedAt<b.length).at(-1);
- const ih=intr.highs.filter(x=>x.confirmedAt<b.length).at(-1), il=intr.lows.filter(x=>x.confirmedAt<b.length).at(-1);
+ const confirmed=(xs)=>xs.filter(x=>x.confirmedAt<b.length);
+ const sh=confirmed(st.highs).at(-1), sl=confirmed(st.lows).at(-1);
+ const ih=confirmed(ith).at(-1), il=confirmed(itl).at(-1);
+ const lh=confirmed(lth).at(-1), ll=confirmed(ltl).at(-1);
+ const last=b[b.length-1];
  let sweep='None on latest closed candle', sweepObj=null;
  if(sh&&last.high>sh.price&&last.close<sh.price){sweep='Buy-side liquidity swept';sweepObj={time:last.time,position:'aboveBar',color:'#f06475',shape:'arrowDown',text:'BSL sweep'}}
  else if(sl&&last.low<sl.price&&last.close>sl.price){sweep='Sell-side liquidity swept';sweepObj={time:last.time,position:'belowBar',color:'#22c58b',shape:'arrowUp',text:'SSL sweep'}}
  let fvg='None on latest 3-candle pattern', fvgObj=null;
- if(b.length>=3){const a=b[b.length-3];if(a.high<last.low){fvg='Bullish FVG candidate';fvgObj={time:last.time,position:'belowBar',color:'#22c58b',shape:'square',text:'FVG'}}else if(a.low>last.high){fvg='Bearish FVG candidate';fvgObj={time:last.time,position:'aboveBar',color:'#f06475',shape:'square',text:'FVG'}}}
- let ob='No qualified OB candidate', obObj=null;
- if(b.length>=12){const bodies=b.slice(-11,-1).map(x=>Math.abs(x.close-x.open));const avg=bodies.reduce((a,v)=>a+v,0)/(bodies.length||1);const body=Math.abs(last.close-last.open);if(body>avg*1.5&&last.close>last.open){for(let j=b.length-2;j>=Math.max(0,b.length-7);j--){if(b[j].close<b[j].open){ob='Bullish OB candidate';obObj={time:b[j].time,position:'belowBar',color:'#70a5ff',shape:'circle',text:'OB?'};break}}}else if(body>avg*1.5&&last.close<last.open){for(let j=b.length-2;j>=Math.max(0,b.length-7);j--){if(b[j].close>b[j].open){ob='Bearish OB candidate';obObj={time:b[j].time,position:'aboveBar',color:'#70a5ff',shape:'circle',text:'OB?'};break}}}}
- $('trend').textContent=bias===1?'Bullish external structure':bias===-1?'Bearish external structure':'No confirmed external bias';
- $('structure').textContent=latest?latest.type+' at '+latest.price.toPrecision(8):'No confirmed BOS / CHoCH';
- $('swh').textContent=sh?sh.price.toPrecision(8):'Not confirmed';$('swl').textContent=sl?sl.price.toPrecision(8):'Not confirmed';
- $('internal').textContent='Internal high: '+(ih?ih.price.toPrecision(7):'—')+' | low: '+(il?il.price.toPrecision(7):'—');
- $('sweep').textContent=sweep;$('idm').textContent='Not confirmed — needs internal liquidity, POI and sweep context';
- $('fvg').textContent=fvg;$('ob').textContent=ob;$('signal').textContent='WAIT / NO TRADE';
- // Chart markers are placed only on actual break/sweep candles, never on every swing point.
- let mk=[];
+ if(b.length>=3){const a=b[b.length-3];if(a.high<last.low){fvg='Bullish FVG candidate';fvgObj={time:last.time,position:'belowBar',color:'#22c58b',shape:'square',text:'FVG?'}}else if(a.low>last.high){fvg='Bearish FVG candidate';fvgObj={time:last.time,position:'aboveBar',color:'#f06475',shape:'square',text:'FVG?'}}}
+ $('trend').textContent=bias===1?'Bullish intermediate structure':bias===-1?'Bearish intermediate structure':'No confirmed intermediate bias';
+ $('structure').textContent=latest?latest.type+' at '+latest.price.toPrecision(8):'No confirmed ITH/ITL break';
+ $('ith').textContent=ih?ih.price.toPrecision(8):'Not confirmed';
+ $('itl').textContent=il?il.price.toPrecision(8):'Not confirmed';
+ $('lt').textContent=(lh?('LTH '+lh.price.toPrecision(7)):'LTH —')+' | '+(ll?('LTL '+ll.price.toPrecision(7)):'LTL —');
+ $('st').textContent=(sh?('STH '+sh.price.toPrecision(7)):'STH —')+' | '+(sl?('STL '+sl.price.toPrecision(7)):'STL —');
+ $('internal').textContent='STH/STL used as short-term liquidity references';
+ $('sweep').textContent=sweep;
+ $('idm').textContent='Not confirmed — requires internal liquidity context + POI + sweep + displacement';
+ $('fvg').textContent=fvg;
+ $('ob').textContent='Not confirmed — needs validated displacement and origin candle';
+ $('signal').textContent='WAIT / NO TRADE';
+ // Show only meaningful intermediate structure pivots and the latest validated break.
+ const mk=[];
+ if(ih)mk.push({time:b[ih.i].time,position:'aboveBar',color:'#70a5ff',shape:'circle',text:'ITH'});
+ if(il)mk.push({time:b[il.i].time,position:'belowBar',color:'#70a5ff',shape:'circle',text:'ITL'});
  if(latest)mk.push({time:b[latest.i].time,position:latest.type.startsWith('Bull')?'belowBar':'aboveBar',color:latest.type.startsWith('Bull')?'#22c58b':'#f06475',shape:latest.type.includes('CHoCH')?'arrowUp':'arrowDown',text:latest.type});
- if(sweepObj)mk.push(sweepObj);if(fvgObj)mk.push(fvgObj);if(obObj)mk.push(obObj);
+ if(sweepObj)mk.push(sweepObj);if(fvgObj)mk.push(fvgObj);
  candles.setMarkers(mk);
 }
 async function load(){const typed=$('search').value.trim().toUpperCase();const symbol=typed||$('symbolSelect').value; $('symbolSelect').value=symbol; $('search').value=symbol;const tf=$('tf').value;if(!/^[A-Z0-9]{5,20}$/.test(symbol)){log('Enter a valid Binance symbol');return} $('pairtitle').textContent=symbol+' · '+$('market').value+' · '+tf;try{const u=endpoints().klines+'?symbol='+encodeURIComponent(symbol)+'&interval='+tf+'&limit=500';const r=await fetch(u);if(!r.ok)throw Error('Kline request failed: '+r.status);const raw=await r.json();if(!Array.isArray(raw)||!raw.length)throw Error('No candle data returned');lastBars=raw.filter(x=>x[6]<Date.now()).map(x=>({time:Math.floor(x[0]/1000),open:+x[1],high:+x[2],low:+x[3],close:+x[4]}));candles.setData(lastBars);chart.timeScale().fitContent();const q=lastBars.at(-1);$('price').textContent='Close: '+q.close;$('connection').textContent='Live public data loaded';analyze(lastBars);log('Loaded '+lastBars.length+' candles for '+symbol)}catch(e){$('connection').textContent='Data request failed';log(e.message)}}
