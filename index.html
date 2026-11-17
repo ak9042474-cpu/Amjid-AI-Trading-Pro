@@ -41,8 +41,13 @@ footer{color:var(--muted);font-size:12px;padding:18px 2px}
 <div class="metric"><span>Latest structure event</span><strong id="structure">—</strong></div>
 <div class="metric"><span>External swing high</span><strong id="swh">—</strong></div>
 <div class="metric"><span>External swing low</span><strong id="swl">—</strong></div>
-<div class="metric"><span>Method</span><strong>5-bar confirmed pivots</strong></div>
-<p class="note">BOS/CHoCH labels are preliminary close-confirmed swing-break observations. IDM, liquidity sweeps, order blocks, FVG, entry, stop-loss and targets are not yet validated in this MVP. No trade signal is issued.</p>
+<div class="metric"><span>Internal structure</span><strong id="internal">—</strong></div>
+<div class="metric"><span>Liquidity sweep</span><strong id="sweep">—</strong></div>
+<div class="metric"><span>IDM</span><strong id="idm">—</strong></div>
+<div class="metric"><span>FVG</span><strong id="fvg">—</strong></div>
+<div class="metric"><span>Order block</span><strong id="ob">—</strong></div>
+<div class="metric"><span>Method</span><strong>External 5-bar / Internal 2-bar pivots</strong></div>
+<p class="note">Structure, sweep, IDM, FVG aur OB labels educational candidates hain. IDM/OB ki definitions market ke mutabiq farq kar sakti hain. Abhi automatic entry, SL aur TP issue nahi hotay. Sirf confirmed closed candles analyze hoti hain.</p>
 <h2 style="margin-top:18px">Activity</h2><div id="log">Waiting for market data…</div>
 </aside></div>
 <footer>Public Binance market data only. No API keys, no order execution. Educational analysis; not financial advice. Confirm all levels independently before trading.</footer>
@@ -53,9 +58,37 @@ function log(s){$('log').innerHTML=(new Date().toLocaleTimeString()+' — '+s+'<
 function endpoints(){return $('market').value==='spot'?{info:'https://api.binance.com/api/v3/exchangeInfo',klines:'https://api.binance.com/api/v3/klines'}:{info:'https://fapi.binance.com/fapi/v1/exchangeInfo',klines:'https://fapi.binance.com/fapi/v1/klines'}}
 function initChart(){chart=LightweightCharts.createChart($('chart'),{layout:{background:{color:'#121a2d'},textColor:'#b8c7df'},grid:{vertLines:{color:'#202b40'},horzLines:{color:'#202b40'}},rightPriceScale:{borderColor:'#34425d'},timeScale:{borderColor:'#34425d',timeVisible:true,secondsVisible:false},crosshair:{mode:1}});candles=chart.addCandlestickSeries({upColor:'#22c58b',downColor:'#f06475',borderUpColor:'#22c58b',borderDownColor:'#f06475',wickUpColor:'#22c58b',wickDownColor:'#f06475'});new ResizeObserver(()=>chart.applyOptions({width:$('chart').clientWidth})).observe($('chart'))}
 async function loadPairs(){try{const r=await fetch(endpoints().info);if(!r.ok)throw Error('Binance pair list HTTP '+r.status);const j=await r.json();const syms=j.symbols.filter(x=>x.status==='TRADING'&&( $('market').value==='spot'?x.isSpotTradingAllowed:x.contractType==='PERPETUAL'&&x.quoteAsset==='USDT')).map(x=>x.symbol).sort();$('pairs').innerHTML=syms.map(x=>'<option value="'+x+'">').join('');$('connection').textContent=syms.length+' Binance pairs available';log('Loaded '+syms.length+' symbols');}catch(e){$('connection').textContent='Pair list unavailable';log(e.message)}}
-function pivots(bars,n=5){let highs=[],lows=[];for(let i=n;i<bars.length-n;i++){let hi=true,lo=true;for(let k=i-n;k<=i+n;k++){if(k===i)continue;if(bars[k].high>=bars[i].high)hi=false;if(bars[k].low<=bars[i].low)lo=false}if(hi)highs.push({i,price:bars[i].high});if(lo)lows.push({i,price:bars[i].low})}return{highs,lows}}
-function analyze(b){const p=pivots(b),last=b[b.length-1],prev=b[b.length-2];let sh=p.highs.at(-1),sl=p.lows.at(-1),event='No confirmed break';if(sh&&prev.close<=sh.price&&last.close>sh.price)event='Bullish structure break (close above swing high)';if(sl&&prev.close>=sl.price&&last.close<sl.price)event='Bearish structure break (close below swing low)';$('trend').textContent=last.close> b[Math.max(0,b.length-20)].close?'Short-term upward':'Short-term downward';$('structure').textContent=event;$('swh').textContent=sh?sh.price.toPrecision(8):'Not confirmed';$('swl').textContent=sl?sl.price.toPrecision(8):'Not confirmed';$('signal').textContent='WAIT / NO TRADE';let mk=[];if(sh)mk.push({time:b[sh.i].time,position:'aboveBar',color:'#70a5ff',shape:'circle',text:'Swing H'});if(sl)mk.push({time:b[sl.i].time,position:'belowBar',color:'#70a5ff',shape:'circle',text:'Swing L'});if(event!=='No confirmed break'){mk.push({time:last.time,position:event.startsWith('Bull')?'aboveBar':'belowBar',color:event.startsWith('Bull')?'#22c58b':'#f06475',shape:'arrowDown',text:event.startsWith('Bull')?'BOS?':'BOS?'});log(event)}candles.setMarkers(mk)}
-async function load(){const symbol=$('search').value.trim().toUpperCase(),tf=$('tf').value;if(!/^[A-Z0-9]{5,20}$/.test(symbol)){log('Enter a valid Binance symbol');return} $('pairtitle').textContent=symbol+' · '+$('market').value+' · '+tf;try{const u=endpoints().klines+'?symbol='+encodeURIComponent(symbol)+'&interval='+tf+'&limit=500';const r=await fetch(u);if(!r.ok)throw Error('Kline request failed: '+r.status);const raw=await r.json();if(!Array.isArray(raw)||!raw.length)throw Error('No candle data returned');lastBars=raw.map(x=>({time:Math.floor(x[0]/1000),open:+x[1],high:+x[2],low:+x[3],close:+x[4]}));candles.setData(lastBars);chart.timeScale().fitContent();const q=lastBars.at(-1);$('price').textContent='Close: '+q.close;$('connection').textContent='Live public data loaded';analyze(lastBars);log('Loaded '+lastBars.length+' candles for '+symbol)}catch(e){$('connection').textContent='Data request failed';log(e.message)}}
+function pivots(bars,n=5){let highs=[],lows=[];for(let i=n;i<bars.length-n;i++){let hi=true,lo=true;for(let k=i-n;k<=i+n;k++){if(k===i)continue;if(bars[k].high>=bars[i].high)hi=false;if(bars[k].low<=bars[i].low)lo=false}if(hi)highs.push({i,confirmedAt:i+n,price:bars[i].high});if(lo)lows.push({i,confirmedAt:i+n,price:bars[i].low})}return{highs,lows}}
+function analyze(b){
+ const ext=pivots(b,5), intr=pivots(b,2), last=b[b.length-1], prev=b[b.length-2];
+ let trend=0, latest=null, brokenH=-1, brokenL=-1;
+ for(let i=12;i<b.length;i++){
+  const h=ext.highs.filter(x=>x.confirmedAt<i).at(-1), l=ext.lows.filter(x=>x.confirmedAt<i).at(-1);
+  if(h&&h.i!==brokenH&&b[i-1].close<=h.price&&b[i].close>h.price){latest={i,type:trend===-1?'Bullish CHoCH':'Bullish BOS',price:h.price};trend=1;brokenH=h.i}
+  if(l&&l.i!==brokenL&&b[i-1].close>=l.price&&b[i].close<l.price){latest={i,type:trend===1?'Bearish CHoCH':'Bearish BOS',price:l.price};trend=-1;brokenL=l.i}
+ }
+ const sh=ext.highs.filter(x=>x.confirmedAt<b.length).at(-1), sl=ext.lows.filter(x=>x.confirmedAt<b.length).at(-1);
+ const ih=intr.highs.filter(x=>x.confirmedAt<b.length).at(-1), il=intr.lows.filter(x=>x.confirmedAt<b.length).at(-1);
+ let sweep='None on latest candle', sweepObj=null;
+ if(sh&&last.high>sh.price&&last.close<sh.price){sweep='Buy-side sweep';sweepObj={time:last.time,position:'aboveBar',color:'#f06475',shape:'arrowDown',text:'BSL sweep'}}
+ else if(sl&&last.low<sl.price&&last.close>sl.price){sweep='Sell-side sweep';sweepObj={time:last.time,position:'belowBar',color:'#22c58b',shape:'arrowUp',text:'SSL sweep'}}
+ let fvg='None detected', fvgObj=null;
+ if(b.length>=3){const a=b[b.length-3];if(a.high<last.low){fvg='Bullish FVG candidate';fvgObj={time:last.time,position:'belowBar',color:'#22c58b',shape:'square',text:'FVG↑'}}else if(a.low>last.high){fvg='Bearish FVG candidate';fvgObj={time:last.time,position:'aboveBar',color:'#f06475',shape:'square',text:'FVG↓'}}}
+ let ob='No displacement OB candidate', obObj=null;
+ if(b.length>=12){const bodies=b.slice(-11,-1).map(x=>Math.abs(x.close-x.open));const avg=bodies.reduce((a,v)=>a+v,0)/(bodies.length||1);const body=Math.abs(last.close-last.open);if(body>avg*1.5&&last.close>last.open){for(let j=b.length-2;j>=Math.max(0,b.length-7);j--){if(b[j].close<b[j].open){ob='Bullish OB candidate';obObj={time:b[j].time,position:'belowBar',color:'#70a5ff',shape:'circle',text:'OB?'};break}}}else if(body>avg*1.5&&last.close<last.open){for(let j=b.length-2;j>=Math.max(0,b.length-7);j--){if(b[j].close>b[j].open){ob='Bearish OB candidate';obObj={time:b[j].time,position:'aboveBar',color:'#70a5ff',shape:'circle',text:'OB?'};break}}}}
+ $('trend').textContent=trend===1?'Bullish structure':trend===-1?'Bearish structure':(last.close>b[Math.max(0,b.length-20)].close?'Short-term upward':'Short-term downward');
+ $('structure').textContent=latest?latest.type+' @ '+latest.price.toPrecision(8):'No confirmed external break';
+ $('swh').textContent=sh?sh.price.toPrecision(8):'Not confirmed';$('swl').textContent=sl?sl.price.toPrecision(8):'Not confirmed';
+ $('internal').textContent='H: '+(ih?ih.price.toPrecision(7):'—')+' | L: '+(il?il.price.toPrecision(7):'—');
+ $('sweep').textContent=sweep;$('idm').textContent=ih||il?'Internal liquidity candidates (not confirmed IDM)':'No internal swing';
+ $('fvg').textContent=fvg;$('ob').textContent=ob;$('signal').textContent='WAIT / NO TRADE';
+ let mk=[];if(sh)mk.push({time:b[sh.i].time,position:'aboveBar',color:'#70a5ff',shape:'circle',text:'Ext H'});if(sl)mk.push({time:b[sl.i].time,position:'belowBar',color:'#70a5ff',shape:'circle',text:'Ext L'});
+ if(ih)mk.push({time:b[ih.i].time,position:'aboveBar',color:'#b58cff',shape:'circle',text:'Int H'});if(il)mk.push({time:b[il.i].time,position:'belowBar',color:'#b58cff',shape:'circle',text:'Int L'});
+ if(latest)mk.push({time:b[latest.i].time,position:latest.type.startsWith('Bull')?'belowBar':'aboveBar',color:latest.type.startsWith('Bull')?'#22c58b':'#f06475',shape:latest.type.includes('CHoCH')?'arrowUp':'arrowDown',text:latest.type});
+ if(sweepObj)mk.push(sweepObj);if(fvgObj)mk.push(fvgObj);if(obObj)mk.push(obObj);
+ candles.setMarkers(mk);
+}
+async function load(){const symbol=$('search').value.trim().toUpperCase(),tf=$('tf').value;if(!/^[A-Z0-9]{5,20}$/.test(symbol)){log('Enter a valid Binance symbol');return} $('pairtitle').textContent=symbol+' · '+$('market').value+' · '+tf;try{const u=endpoints().klines+'?symbol='+encodeURIComponent(symbol)+'&interval='+tf+'&limit=500';const r=await fetch(u);if(!r.ok)throw Error('Kline request failed: '+r.status);const raw=await r.json();if(!Array.isArray(raw)||!raw.length)throw Error('No candle data returned');lastBars=raw.filter(x=>x[6]<Date.now()).map(x=>({time:Math.floor(x[0]/1000),open:+x[1],high:+x[2],low:+x[3],close:+x[4]}));candles.setData(lastBars);chart.timeScale().fitContent();const q=lastBars.at(-1);$('price').textContent='Close: '+q.close;$('connection').textContent='Live public data loaded';analyze(lastBars);log('Loaded '+lastBars.length+' candles for '+symbol)}catch(e){$('connection').textContent='Data request failed';log(e.message)}}
 $('load').onclick=load;$('refresh').onclick=load;$('market').onchange=()=>{loadPairs();load()};$('tf').onchange=load;initChart();loadPairs().then(load);
 </script>
 </body></html>
