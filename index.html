@@ -62,7 +62,7 @@ function initChart(){chart=LightweightCharts.createChart($('chart'),{layout:{bac
 async function loadPairs(){return true}
 function pivots(bars,n=5){let highs=[],lows=[];for(let i=n;i<bars.length-n;i++){let hi=true,lo=true;for(let k=i-n;k<=i+n;k++){if(k===i)continue;if(bars[k].high>=bars[i].high)hi=false;if(bars[k].low<=bars[i].low)lo=false}if(hi)highs.push({i,confirmedAt:i+n,price:bars[i].high});if(lo)lows.push({i,confirmedAt:i+n,price:bars[i].low})}return{highs,lows}}
 function analyze(allBars){
- // Analyze only fully closed 2D candles; the forming candle remains visible but cannot trigger labels.
+ // Analyze only fully closed candles for the selected timeframe; the forming candle remains visible but cannot trigger labels.
  const b=allBars.slice(0,-1);
  if(b.length<20){candles.setMarkers([]);return;}
  const st=pivots(b,1);
@@ -152,6 +152,6 @@ async function load(){
   analyze(lastBars);connectLive(symbol,interval);log(symbol+' Binance '+interval+' chart loaded');
  }catch(e){$('connection').textContent='Data error';log(e.message)}
 }
-$('load').onclick=load;$('search').addEventListener('keydown',e=>{if(e.key==='Enter')load()});$('market').onchange=load;initChart();load();
+$('load').onclick=load;$('search').addEventListener('keydown',e=>{if(e.key==='Enter')load()});$('market').onchange=load;$('tf').onchange=load;initChart();load();
 </script>
 </body></html>
