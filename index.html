@@ -29,7 +29,7 @@ footer{color:var(--muted);font-size:12px;padding:18px 2px}
 <main>
 <div class="toolbar">
 <select id="market"><option value="spot">Spot</option><option value="futures">USDT-M Futures</option></select>
-<input id="search" placeholder="Search pair e.g. BTCUSDT" value="BTCUSDT" list="pairs"><datalist id="pairs"></datalist>
+<input id="search" placeholder="Search coin e.g. ETHUSDT" value="BTCUSDT"><select id="symbolSelect" aria-label="Select Binance pair"><option>Loading pairs…</option></select>
 <select id="tf"><option>5m</option><option selected>15m</option><option>1h</option><option>4h</option><option>1d</option><option>1w</option></select>
 <button id="load">Load chart</button><button id="refresh">Refresh</button>
 </div>
@@ -57,38 +57,52 @@ const $=id=>document.getElementById(id);let chart,candles,markers=[],lastBars=[]
 function log(s){$('log').innerHTML=(new Date().toLocaleTimeString()+' — '+s+'<br>')+$('log').innerHTML}
 function endpoints(){return $('market').value==='spot'?{info:'https://api.binance.com/api/v3/exchangeInfo',klines:'https://api.binance.com/api/v3/klines'}:{info:'https://fapi.binance.com/fapi/v1/exchangeInfo',klines:'https://fapi.binance.com/fapi/v1/klines'}}
 function initChart(){chart=LightweightCharts.createChart($('chart'),{layout:{background:{color:'#121a2d'},textColor:'#b8c7df'},grid:{vertLines:{color:'#202b40'},horzLines:{color:'#202b40'}},rightPriceScale:{borderColor:'#34425d'},timeScale:{borderColor:'#34425d',timeVisible:true,secondsVisible:false},crosshair:{mode:1}});candles=chart.addCandlestickSeries({upColor:'#22c58b',downColor:'#f06475',borderUpColor:'#22c58b',borderDownColor:'#f06475',wickUpColor:'#22c58b',wickDownColor:'#f06475'});new ResizeObserver(()=>chart.applyOptions({width:$('chart').clientWidth})).observe($('chart'))}
-async function loadPairs(){try{const r=await fetch(endpoints().info);if(!r.ok)throw Error('Binance pair list HTTP '+r.status);const j=await r.json();const syms=j.symbols.filter(x=>x.status==='TRADING'&&( $('market').value==='spot'?x.isSpotTradingAllowed:x.contractType==='PERPETUAL'&&x.quoteAsset==='USDT')).map(x=>x.symbol).sort();$('pairs').innerHTML=syms.map(x=>'<option value="'+x+'">').join('');$('connection').textContent=syms.length+' Binance pairs available';log('Loaded '+syms.length+' symbols');}catch(e){$('connection').textContent='Pair list unavailable';log(e.message)}}
+async function loadPairs(){try{const r=await fetch(endpoints().info);if(!r.ok)throw Error('Binance pair list HTTP '+r.status);const j=await r.json();const syms=j.symbols.filter(x=>x.status==='TRADING'&&($('market').value==='spot'?x.isSpotTradingAllowed:(x.contractType==='PERPETUAL'&&x.quoteAsset==='USDT'))).map(x=>x.symbol).sort();$('symbolSelect').innerHTML=syms.map(x=>'<option value="'+x+'">'+x+'</option>').join('');if(syms.includes($('search').value.toUpperCase()))$('symbolSelect').value=$('search').value.toUpperCase();else $('symbolSelect').value=syms.includes('BTCUSDT')?'BTCUSDT':(syms[0]||'');$('search').value=$('symbolSelect').value;$('connection').textContent=syms.length+' Binance pairs loaded';log('Loaded '+syms.length+' tradable pairs');}catch(e){$('connection').textContent='Pair list unavailable';log(e.message)}}
 function pivots(bars,n=5){let highs=[],lows=[];for(let i=n;i<bars.length-n;i++){let hi=true,lo=true;for(let k=i-n;k<=i+n;k++){if(k===i)continue;if(bars[k].high>=bars[i].high)hi=false;if(bars[k].low<=bars[i].low)lo=false}if(hi)highs.push({i,confirmedAt:i+n,price:bars[i].high});if(lo)lows.push({i,confirmedAt:i+n,price:bars[i].low})}return{highs,lows}}
 function analyze(b){
- const ext=pivots(b,5), intr=pivots(b,2), last=b[b.length-1], prev=b[b.length-2];
- let trend=0, latest=null, brokenH=-1, brokenL=-1;
+ const ext=pivots(b,5), intr=pivots(b,2), last=b[b.length-1];
+ let bias=0, latest=null, protectedLow=null, protectedHigh=null, usedHigh=-1, usedLow=-1;
+ // Walk forward in time. A pivot is usable only after its right-side confirmation candles have closed.
  for(let i=12;i<b.length;i++){
-  const h=ext.highs.filter(x=>x.confirmedAt<i).at(-1), l=ext.lows.filter(x=>x.confirmedAt<i).at(-1);
-  if(h&&h.i!==brokenH&&b[i-1].close<=h.price&&b[i].close>h.price){latest={i,type:trend===-1?'Bullish CHoCH':'Bullish BOS',price:h.price};trend=1;brokenH=h.i}
-  if(l&&l.i!==brokenL&&b[i-1].close>=l.price&&b[i].close<l.price){latest={i,type:trend===1?'Bearish CHoCH':'Bearish BOS',price:l.price};trend=-1;brokenL=l.i}
+  const hs=ext.highs.filter(x=>x.confirmedAt<i), ls=ext.lows.filter(x=>x.confirmedAt<i);
+  const h=hs.at(-1), l=ls.at(-1);
+  if(h&&h.i!==usedHigh&&b[i-1].close<=h.price&&b[i].close>h.price){
+   const isChange=bias===-1;
+   latest={i,type:isChange?'Bullish CHoCH':'Bullish BOS',price:h.price};
+   bias=1; usedHigh=h.i;
+   // Once bullish structure is established, the last confirmed opposing swing low is protected.
+   protectedLow=l||protectedLow;
+  }
+  if(l&&l.i!==usedLow&&b[i-1].close>=l.price&&b[i].close<l.price){
+   const isChange=bias===1;
+   latest={i,type:isChange?'Bearish CHoCH':'Bearish BOS',price:l.price};
+   bias=-1; usedLow=l.i;
+   protectedHigh=h||protectedHigh;
+  }
  }
  const sh=ext.highs.filter(x=>x.confirmedAt<b.length).at(-1), sl=ext.lows.filter(x=>x.confirmedAt<b.length).at(-1);
  const ih=intr.highs.filter(x=>x.confirmedAt<b.length).at(-1), il=intr.lows.filter(x=>x.confirmedAt<b.length).at(-1);
- let sweep='None on latest candle', sweepObj=null;
- if(sh&&last.high>sh.price&&last.close<sh.price){sweep='Buy-side sweep';sweepObj={time:last.time,position:'aboveBar',color:'#f06475',shape:'arrowDown',text:'BSL sweep'}}
- else if(sl&&last.low<sl.price&&last.close>sl.price){sweep='Sell-side sweep';sweepObj={time:last.time,position:'belowBar',color:'#22c58b',shape:'arrowUp',text:'SSL sweep'}}
- let fvg='None detected', fvgObj=null;
- if(b.length>=3){const a=b[b.length-3];if(a.high<last.low){fvg='Bullish FVG candidate';fvgObj={time:last.time,position:'belowBar',color:'#22c58b',shape:'square',text:'FVG↑'}}else if(a.low>last.high){fvg='Bearish FVG candidate';fvgObj={time:last.time,position:'aboveBar',color:'#f06475',shape:'square',text:'FVG↓'}}}
- let ob='No displacement OB candidate', obObj=null;
+ let sweep='None on latest closed candle', sweepObj=null;
+ if(sh&&last.high>sh.price&&last.close<sh.price){sweep='Buy-side liquidity swept';sweepObj={time:last.time,position:'aboveBar',color:'#f06475',shape:'arrowDown',text:'BSL sweep'}}
+ else if(sl&&last.low<sl.price&&last.close>sl.price){sweep='Sell-side liquidity swept';sweepObj={time:last.time,position:'belowBar',color:'#22c58b',shape:'arrowUp',text:'SSL sweep'}}
+ let fvg='None on latest 3-candle pattern', fvgObj=null;
+ if(b.length>=3){const a=b[b.length-3];if(a.high<last.low){fvg='Bullish FVG candidate';fvgObj={time:last.time,position:'belowBar',color:'#22c58b',shape:'square',text:'FVG'}}else if(a.low>last.high){fvg='Bearish FVG candidate';fvgObj={time:last.time,position:'aboveBar',color:'#f06475',shape:'square',text:'FVG'}}}
+ let ob='No qualified OB candidate', obObj=null;
  if(b.length>=12){const bodies=b.slice(-11,-1).map(x=>Math.abs(x.close-x.open));const avg=bodies.reduce((a,v)=>a+v,0)/(bodies.length||1);const body=Math.abs(last.close-last.open);if(body>avg*1.5&&last.close>last.open){for(let j=b.length-2;j>=Math.max(0,b.length-7);j--){if(b[j].close<b[j].open){ob='Bullish OB candidate';obObj={time:b[j].time,position:'belowBar',color:'#70a5ff',shape:'circle',text:'OB?'};break}}}else if(body>avg*1.5&&last.close<last.open){for(let j=b.length-2;j>=Math.max(0,b.length-7);j--){if(b[j].close>b[j].open){ob='Bearish OB candidate';obObj={time:b[j].time,position:'aboveBar',color:'#70a5ff',shape:'circle',text:'OB?'};break}}}}
- $('trend').textContent=trend===1?'Bullish structure':trend===-1?'Bearish structure':(last.close>b[Math.max(0,b.length-20)].close?'Short-term upward':'Short-term downward');
- $('structure').textContent=latest?latest.type+' @ '+latest.price.toPrecision(8):'No confirmed external break';
+ $('trend').textContent=bias===1?'Bullish external structure':bias===-1?'Bearish external structure':'No confirmed external bias';
+ $('structure').textContent=latest?latest.type+' at '+latest.price.toPrecision(8):'No confirmed BOS / CHoCH';
  $('swh').textContent=sh?sh.price.toPrecision(8):'Not confirmed';$('swl').textContent=sl?sl.price.toPrecision(8):'Not confirmed';
- $('internal').textContent='H: '+(ih?ih.price.toPrecision(7):'—')+' | L: '+(il?il.price.toPrecision(7):'—');
- $('sweep').textContent=sweep;$('idm').textContent=ih||il?'Internal liquidity candidates (not confirmed IDM)':'No internal swing';
+ $('internal').textContent='Internal high: '+(ih?ih.price.toPrecision(7):'—')+' | low: '+(il?il.price.toPrecision(7):'—');
+ $('sweep').textContent=sweep;
+ $('idm').textContent='Not confirmed — internal swing liquidity only; needs POI and sweep context';
  $('fvg').textContent=fvg;$('ob').textContent=ob;$('signal').textContent='WAIT / NO TRADE';
- let mk=[];if(sh)mk.push({time:b[sh.i].time,position:'aboveBar',color:'#70a5ff',shape:'circle',text:'Ext H'});if(sl)mk.push({time:b[sl.i].time,position:'belowBar',color:'#70a5ff',shape:'circle',text:'Ext L'});
- if(ih)mk.push({time:b[ih.i].time,position:'aboveBar',color:'#b58cff',shape:'circle',text:'Int H'});if(il)mk.push({time:b[il.i].time,position:'belowBar',color:'#b58cff',shape:'circle',text:'Int L'});
+ // Keep the chart clean: no labels on every swing. BOS/CHoCH appears only on the actual confirmed break candle.
+ let mk=[];
  if(latest)mk.push({time:b[latest.i].time,position:latest.type.startsWith('Bull')?'belowBar':'aboveBar',color:latest.type.startsWith('Bull')?'#22c58b':'#f06475',shape:latest.type.includes('CHoCH')?'arrowUp':'arrowDown',text:latest.type});
  if(sweepObj)mk.push(sweepObj);if(fvgObj)mk.push(fvgObj);if(obObj)mk.push(obObj);
  candles.setMarkers(mk);
 }
-async function load(){const symbol=$('search').value.trim().toUpperCase(),tf=$('tf').value;if(!/^[A-Z0-9]{5,20}$/.test(symbol)){log('Enter a valid Binance symbol');return} $('pairtitle').textContent=symbol+' · '+$('market').value+' · '+tf;try{const u=endpoints().klines+'?symbol='+encodeURIComponent(symbol)+'&interval='+tf+'&limit=500';const r=await fetch(u);if(!r.ok)throw Error('Kline request failed: '+r.status);const raw=await r.json();if(!Array.isArray(raw)||!raw.length)throw Error('No candle data returned');lastBars=raw.filter(x=>x[6]<Date.now()).map(x=>({time:Math.floor(x[0]/1000),open:+x[1],high:+x[2],low:+x[3],close:+x[4]}));candles.setData(lastBars);chart.timeScale().fitContent();const q=lastBars.at(-1);$('price').textContent='Close: '+q.close;$('connection').textContent='Live public data loaded';analyze(lastBars);log('Loaded '+lastBars.length+' candles for '+symbol)}catch(e){$('connection').textContent='Data request failed';log(e.message)}}
-$('load').onclick=load;$('refresh').onclick=load;$('market').onchange=()=>{loadPairs();load()};$('tf').onchange=load;initChart();loadPairs().then(load);
+async function load(){const typed=$('search').value.trim().toUpperCase();const symbol=typed||$('symbolSelect').value; $('symbolSelect').value=symbol; $('search').value=symbol;const tf=$('tf').value;if(!/^[A-Z0-9]{5,20}$/.test(symbol)){log('Enter a valid Binance symbol');return} $('pairtitle').textContent=symbol+' · '+$('market').value+' · '+tf;try{const u=endpoints().klines+'?symbol='+encodeURIComponent(symbol)+'&interval='+tf+'&limit=500';const r=await fetch(u);if(!r.ok)throw Error('Kline request failed: '+r.status);const raw=await r.json();if(!Array.isArray(raw)||!raw.length)throw Error('No candle data returned');lastBars=raw.filter(x=>x[6]<Date.now()).map(x=>({time:Math.floor(x[0]/1000),open:+x[1],high:+x[2],low:+x[3],close:+x[4]}));candles.setData(lastBars);chart.timeScale().fitContent();const q=lastBars.at(-1);$('price').textContent='Close: '+q.close;$('connection').textContent='Live public data loaded';analyze(lastBars);log('Loaded '+lastBars.length+' candles for '+symbol)}catch(e){$('connection').textContent='Data request failed';log(e.message)}}
+$('load').onclick=load;$('refresh').onclick=load;$('search').oninput=()=>{const q=$('search').value.toUpperCase();const match=[...$('symbolSelect').options].find(o=>o.value===q);if(match)$('symbolSelect').value=q};$('symbolSelect').onchange=()=>{$('search').value=$('symbolSelect').value;load()};$('market').onchange=()=>{loadPairs().then(load)};$('tf').onchange=load;initChart();loadPairs().then(load);
 </script>
 </body></html>
