@@ -13,7 +13,7 @@ h1{font-size:19px;margin:0}header small{color:var(--muted)}main{max-width:1450px
 .toolbar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
 select,input,button{background:#0c1426;color:var(--text);border:1px solid #34425d;border-radius:8px;padding:10px;font:inherit}
 input{min-width:130px;flex:1}button{cursor:pointer}button.active{border-color:var(--blue);background:#1b3154}
-.layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px}.chartbox{min-width:0}
+.layout{display:block}.chartbox{min-width:0}aside.panel{display:none}
 #chart{height:530px;width:100%}.chart-head{display:flex;justify-content:space-between;gap:10px;padding:5px 2px 12px;flex-wrap:wrap}
 .panel h2{font-size:15px;margin:0 0 12px}.metric{padding:10px 0;border-bottom:1px solid var(--line)}.metric:last-child{border:0}
 .metric span{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}.metric strong{font-size:14px;overflow-wrap:anywhere}
@@ -55,11 +55,11 @@ footer{color:var(--muted);font-size:12px;padding:18px 2px}
 <footer>Public Binance market data only. No API keys, no order execution. Educational analysis; not financial advice. Confirm all levels independently before trading.</footer>
 </main>
 <script>
-const $=id=>document.getElementById(id);let chart,candles,markers=[],lastBars=[];
+const $=id=>document.getElementById(id);let chart,candles,markers=[],lastBars=[],socket=null,rawDaily=[];
 function log(s){$('log').innerHTML=(new Date().toLocaleTimeString()+' — '+s+'<br>')+$('log').innerHTML}
-function endpoints(){return $('market').value==='spot'?{info:'https://api.binance.com/api/v3/exchangeInfo',klines:'https://api.binance.com/api/v3/klines'}:{info:'https://fapi.binance.com/fapi/v1/exchangeInfo',klines:'https://fapi.binance.com/fapi/v1/klines'}}
+function endpoints(){return $('market').value==='spot'?{klines:'https://api.binance.com/api/v3/klines',ws:'wss://stream.binance.com:9443/ws/'}:{klines:'https://fapi.binance.com/fapi/v1/klines',ws:'wss://fstream.binance.com/ws/'}}
 function initChart(){chart=LightweightCharts.createChart($('chart'),{layout:{background:{color:'#121a2d'},textColor:'#b8c7df'},grid:{vertLines:{color:'#202b40'},horzLines:{color:'#202b40'}},rightPriceScale:{borderColor:'#34425d'},timeScale:{borderColor:'#34425d',timeVisible:true,secondsVisible:false},crosshair:{mode:1}});candles=chart.addCandlestickSeries({upColor:'#22c58b',downColor:'#f06475',borderUpColor:'#22c58b',borderDownColor:'#f06475',wickUpColor:'#22c58b',wickDownColor:'#f06475'});new ResizeObserver(()=>chart.applyOptions({width:$('chart').clientWidth})).observe($('chart'))}
-async function loadPairs(){try{const r=await fetch(endpoints().info);if(!r.ok)throw Error('Binance pair list HTTP '+r.status);const j=await r.json();const syms=j.symbols.filter(x=>x.status==='TRADING'&&($('market').value==='spot'?x.isSpotTradingAllowed:(x.contractType==='PERPETUAL'&&x.quoteAsset==='USDT'))).map(x=>x.symbol).sort();$('symbolSelect').innerHTML=syms.map(x=>'<option value="'+x+'">'+x+'</option>').join('');if(syms.includes($('search').value.toUpperCase()))$('symbolSelect').value=$('search').value.toUpperCase();else $('symbolSelect').value=syms.includes('BTCUSDT')?'BTCUSDT':(syms[0]||'');$('search').value=$('symbolSelect').value;$('connection').textContent=syms.length+' Binance pairs loaded';log('Loaded '+syms.length+' tradable pairs');}catch(e){$('connection').textContent='Pair list unavailable';log(e.message)}}
+async function loadPairs(){return true}
 function pivots(bars,n=5){let highs=[],lows=[];for(let i=n;i<bars.length-n;i++){let hi=true,lo=true;for(let k=i-n;k<=i+n;k++){if(k===i)continue;if(bars[k].high>=bars[i].high)hi=false;if(bars[k].low<=bars[i].low)lo=false}if(hi)highs.push({i,confirmedAt:i+n,price:bars[i].high});if(lo)lows.push({i,confirmedAt:i+n,price:bars[i].low})}return{highs,lows}}
 function analyze(b){
  // ICT nested swing hierarchy: STH/STL -> ITH/ITL -> LTH/LTL.
@@ -123,7 +123,49 @@ function analyze(b){
  if(sweepObj)mk.push(sweepObj);if(fvgObj)mk.push(fvgObj);
  candles.setMarkers(mk);
 }
-async function load(){const typed=$('search').value.trim().toUpperCase();const symbol=typed||$('symbolSelect').value; $('symbolSelect').value=symbol; $('search').value=symbol;const tf=$('tf').value;if(!/^[A-Z0-9]{5,20}$/.test(symbol)){log('Enter a valid Binance symbol');return} $('pairtitle').textContent=symbol+' · '+$('market').value+' · '+tf;try{const u=endpoints().klines+'?symbol='+encodeURIComponent(symbol)+'&interval='+tf+'&limit=500';const r=await fetch(u);if(!r.ok)throw Error('Kline request failed: '+r.status);const raw=await r.json();if(!Array.isArray(raw)||!raw.length)throw Error('No candle data returned');lastBars=raw.filter(x=>x[6]<Date.now()).map(x=>({time:Math.floor(x[0]/1000),open:+x[1],high:+x[2],low:+x[3],close:+x[4]}));candles.setData(lastBars);chart.timeScale().fitContent();const q=lastBars.at(-1);$('price').textContent='Close: '+q.close;$('connection').textContent='Live public data loaded';analyze(lastBars);log('Loaded '+lastBars.length+' candles for '+symbol)}catch(e){$('connection').textContent='Data request failed';log(e.message)}}
-$('load').onclick=load;$('refresh').onclick=load;$('search').oninput=()=>{const q=$('search').value.toUpperCase();const match=[...$('symbolSelect').options].find(o=>o.value===q);if(match)$('symbolSelect').value=q};$('symbolSelect').onchange=()=>{$('search').value=$('symbolSelect').value;load()};$('market').onchange=()=>{loadPairs().then(load)};$('tf').onchange=load;initChart();loadPairs().then(load);
+function aggregate2D(daily){
+ const out=new Map();
+ for(const x of daily){
+  const t=Math.floor(x.time/172800)*172800;
+  if(!out.has(t))out.set(t,{time:t,open:x.open,high:x.high,low:x.low,close:x.close});
+  else{const c=out.get(t);c.high=Math.max(c.high,x.high);c.low=Math.min(c.low,x.low);c.close=x.close;}
+ }
+ return [...out.values()].sort((a,b)=>a.time-b.time);
+}
+function stopSocket(){if(socket){socket.onclose=null;socket.close();socket=null}}
+function connectLive(symbol){
+ stopSocket();
+ socket=new WebSocket(endpoints().ws+symbol.toLowerCase()+'@kline_1d');
+ socket.onmessage=e=>{
+  const m=JSON.parse(e.data),k=m.k;
+  const day={time:Math.floor(k.t/1000),open:+k.o,high:+k.h,low:+k.l,close:+k.c};
+  const idx=rawDaily.findIndex(x=>x.time===day.time);
+  if(idx>=0)rawDaily[idx]=day;else rawDaily.push(day);
+  rawDaily.sort((x,y)=>x.time-y.time);
+  lastBars=aggregate2D(rawDaily);candles.setData(lastBars);
+  const current=lastBars.at(-1);
+  if(current){$('price').textContent='Live: '+current.close;analyze(lastBars);}
+ };
+ socket.onopen=()=>{$('connection').textContent='Binance live stream connected'};
+ socket.onerror=()=>{$('connection').textContent='Live stream reconnecting'};
+ socket.onclose=()=>{$('connection').textContent='Live stream disconnected — reload if needed'};
+}
+async function load(){
+ const symbol=$('search').value.trim().toUpperCase();
+ if(!/^[A-Z0-9]{5,25}$/.test(symbol)){log('Binance coin symbol sahi likhein, misal BTCUSDT');return}
+ $('search').value=symbol;$('pairtitle').textContent=symbol+' · '+$('market').value+' · 2D';
+ $('connection').textContent='Binance data loading…';
+ try{
+  stopSocket();
+  const u=endpoints().klines+'?symbol='+encodeURIComponent(symbol)+'&interval=1d&limit=1000';
+  const r=await fetch(u);if(!r.ok)throw Error('Binance symbol/data error: '+r.status+' — symbol check karein');
+  const raw=await r.json();if(!Array.isArray(raw)||!raw.length)throw Error('Binance se candles nahi milin');
+  rawDaily=raw.map(x=>({time:Math.floor(x[0]/1000),open:+x[1],high:+x[2],low:+x[3],close:+x[4]}));
+  lastBars=aggregate2D(rawDaily);candles.setData(lastBars);chart.timeScale().fitContent();
+  const q=lastBars.at(-1);$('price').textContent='Last: '+q.close;
+  analyze(lastBars);connectLive(symbol);log(symbol+' Binance 2D chart loaded');
+ }catch(e){$('connection').textContent='Data error';log(e.message)}
+}
+$('load').onclick=load;$('search').addEventListener('keydown',e=>{if(e.key==='Enter')load()});$('market').onchange=load;initChart();load();
 </script>
 </body></html>
