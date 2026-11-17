@@ -55,7 +55,7 @@ footer{display:none}
 <footer>Public Binance market data only. No API keys, no order execution. Educational analysis; not financial advice. Confirm all levels independently before trading.</footer>
 </main>
 <script>
-const $=id=>document.getElementById(id);let chart,candles,markers=[],lastBars=[],socket=null,rawDaily=[];
+const $=id=>document.getElementById(id);let chart,candles,markers=[],lastBars=[],socket=null,rawBars=[];
 function log(s){$('log').innerHTML=(new Date().toLocaleTimeString()+' — '+s+'<br>')+$('log').innerHTML}
 function endpoints(){return $('market').value==='spot'?{klines:'https://api.binance.com/api/v3/klines',ws:'wss://stream.binance.com:9443/ws/'}:{klines:'https://fapi.binance.com/fapi/v1/klines',ws:'wss://fstream.binance.com/ws/'}}
 function initChart(){chart=LightweightCharts.createChart($('chart'),{layout:{background:{color:'#121a2d'},textColor:'#b8c7df'},grid:{vertLines:{color:'#202b40'},horzLines:{color:'#202b40'}},rightPriceScale:{borderColor:'#34425d'},timeScale:{borderColor:'#34425d',timeVisible:true,secondsVisible:false},crosshair:{mode:1}});candles=chart.addCandlestickSeries({upColor:'#22c58b',downColor:'#f06475',borderUpColor:'#22c58b',borderDownColor:'#f06475',wickUpColor:'#22c58b',wickDownColor:'#f06475'});new ResizeObserver(()=>chart.applyOptions({width:$('chart').clientWidth})).observe($('chart'))}
@@ -117,26 +117,17 @@ function analyze(allBars){
  if(entryReady)mk.push({time:last.time,position:latest.type.startsWith('Bull')?'belowBar':'aboveBar',color:latest.type.startsWith('Bull')?'#22c58b':'#f06475',shape:'arrowUp',text:'ENTRY'});
  candles.setMarkers(mk);
 }
-function aggregate2D(daily){
- const out=new Map();
- for(const x of daily){
-  const t=Math.floor(x.time/172800)*172800;
-  if(!out.has(t))out.set(t,{time:t,open:x.open,high:x.high,low:x.low,close:x.close});
-  else{const c=out.get(t);c.high=Math.max(c.high,x.high);c.low=Math.min(c.low,x.low);c.close=x.close;}
- }
- return [...out.values()].sort((a,b)=>a.time-b.time);
-}
 function stopSocket(){if(socket){socket.onclose=null;socket.close();socket=null}}
-function connectLive(symbol){
+function connectLive(symbol,interval){
  stopSocket();
- socket=new WebSocket(endpoints().ws+symbol.toLowerCase()+'@kline_1d');
+ socket=new WebSocket(endpoints().ws+symbol.toLowerCase()+'@kline_'+interval);
  socket.onmessage=e=>{
   const m=JSON.parse(e.data),k=m.k;
   const day={time:Math.floor(k.t/1000),open:+k.o,high:+k.h,low:+k.l,close:+k.c};
-  const idx=rawDaily.findIndex(x=>x.time===day.time);
-  if(idx>=0)rawDaily[idx]=day;else rawDaily.push(day);
-  rawDaily.sort((x,y)=>x.time-y.time);
-  lastBars=aggregate2D(rawDaily);candles.setData(lastBars);
+  const idx=rawBars.findIndex(x=>x.time===day.time);
+  if(idx>=0)rawBars[idx]=day;else rawBars.push(day);
+  rawBars.sort((x,y)=>x.time-y.time);
+  lastBars=rawBars.slice();candles.setData(lastBars);
   const current=lastBars.at(-1);
   if(current){$('price').textContent='Live: '+current.close;analyze(lastBars);}
  };
@@ -146,18 +137,19 @@ function connectLive(symbol){
 }
 async function load(){
  const symbol=$('search').value.trim().toUpperCase();
+ const interval=$('tf').value;
  if(!/^[A-Z0-9]{5,25}$/.test(symbol)){log('Binance coin symbol sahi likhein, misal BTCUSDT');return}
- $('search').value=symbol;$('pairtitle').textContent=symbol+' · '+$('market').value+' · 2D';
+ $('search').value=symbol;$('pairtitle').textContent=symbol+' · '+$('market').value+' · '+interval;
  $('connection').textContent='Binance data loading…';
  try{
   stopSocket();
-  const u=endpoints().klines+'?symbol='+encodeURIComponent(symbol)+'&interval=1d&limit=1000';
+  const u=endpoints().klines+'?symbol='+encodeURIComponent(symbol)+'&interval='+encodeURIComponent(interval)+'&limit=1000';
   const r=await fetch(u);if(!r.ok)throw Error('Binance symbol/data error: '+r.status+' — symbol check karein');
   const raw=await r.json();if(!Array.isArray(raw)||!raw.length)throw Error('Binance se candles nahi milin');
-  rawDaily=raw.map(x=>({time:Math.floor(x[0]/1000),open:+x[1],high:+x[2],low:+x[3],close:+x[4]}));
-  lastBars=aggregate2D(rawDaily);candles.setData(lastBars);chart.timeScale().fitContent();
+  rawBars=raw.map(x=>({time:Math.floor(x[0]/1000),open:+x[1],high:+x[2],low:+x[3],close:+x[4]}));
+  lastBars=rawBars.slice();candles.setData(lastBars);chart.timeScale().fitContent();
   const q=lastBars.at(-1);$('price').textContent='Last: '+q.close;
-  analyze(lastBars);connectLive(symbol);log(symbol+' Binance 2D chart loaded');
+  analyze(lastBars);connectLive(symbol,interval);log(symbol+' Binance '+interval+' chart loaded');
  }catch(e){$('connection').textContent='Data error';log(e.message)}
 }
 $('load').onclick=load;$('search').addEventListener('keydown',e=>{if(e.key==='Enter')load()});$('market').onchange=load;initChart();load();
