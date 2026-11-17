@@ -13,7 +13,7 @@ h1{font-size:19px;margin:0}header small{color:var(--muted)}main{max-width:1450px
 .toolbar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
 select,input,button{background:#0c1426;color:var(--text);border:1px solid #34425d;border-radius:8px;padding:10px;font:inherit}
 input{min-width:130px;flex:1}button{cursor:pointer}button.active{border-color:var(--blue);background:#1b3154}
-.layout{display:block}.chartbox{min-width:0}aside.panel{display:none}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:14px}.chartbox{min-width:0}aside.panel{display:block;min-width:0}
 #chart{height:530px;width:100%;position:relative}#drawings{position:absolute;inset:0;z-index:5;pointer-events:none;overflow:hidden}.map-line{position:absolute;height:0;border-top:1px dashed;opacity:.95}.map-tag{position:absolute;right:62px;transform:translateY(-100%);font-size:10px;font-weight:700;padding:2px 5px;border-radius:3px;white-space:nowrap;background:#10192b}.map-zone{position:absolute;border:1px solid;border-radius:3px;opacity:.22}.map-zone-label{position:absolute;font-size:10px;font-weight:700;padding:2px 4px;background:#10192b;border-radius:3px;white-space:nowrap}.chart-head{display:flex;justify-content:space-between;gap:10px;padding:5px 2px 12px;flex-wrap:wrap}
 .panel h2{font-size:15px;margin:0 0 12px}.metric{padding:10px 0;border-bottom:1px solid var(--line)}.metric:last-child{border:0}
 .metric span{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}.metric strong{font-size:14px;overflow-wrap:anywhere}
@@ -150,6 +150,22 @@ function analyze(allBars){
    tradePlan={side:'SELL',entry,sl,tp:entry-(sl-entry)*1.5,rr:'1:1.5'};
   }
  }
+ // Populate the visible analysis panel for every selected coin and timeframe.
+ const fmt=v=>Number.isFinite(v)?v.toFixed(6):'—';
+ $('signal').textContent=tradePlan?(tradePlan.side+' SETUP — confirm OB retest'):'WAIT / NO TRADE';
+ $('signal').style.color=tradePlan?(tradePlan.side==='BUY'?'#22c58b':'#f06475'):'#ffd477';
+ $('trend').textContent=bias===1?'Bullish':bias===-1?'Bearish':'Not confirmed';
+ $('structure').textContent=latest?latest.type+' @ '+fmt(latest.price):'No confirmed BOS / CHoCH';
+ $('ith').textContent=ith.length?fmt(ith.at(-1).price):'—';
+ $('itl').textContent=itl.length?fmt(itl.at(-1).price):'—';
+ $('lt').textContent='Not confirmed by current swing filter';
+ $('st').textContent=(st.highs.length?('H '+fmt(st.highs.at(-1).price)):'H —')+' / '+(st.lows.length?('L '+fmt(st.lows.at(-1).price)):'L —');
+ $('internal').textContent=bias===1?'Bullish':bias===-1?'Bearish':'Unconfirmed';
+ $('sweep').textContent=sweepAt>=0?(sweepSide==='buy'?'High-side liquidity swept':'Low-side liquidity swept'):'No recent confirmed sweep';
+ $('idm').textContent=idmState?idmState.kind+' @ '+fmt(idmState.price):(idmPivot?'Candidate @ '+fmt(idmPivot.price):'No confirmed IDM');
+ $('fvg').textContent=fvgZone?(fvgZone.side.toUpperCase()+' '+fmt(fvgZone.low)+'–'+fmt(fvgZone.high)):'No recent FVG';
+ $('ob').textContent=obZone?(obZone.side.toUpperCase()+' '+fmt(obZone.low)+'–'+fmt(obZone.high)):'No valid candidate OB';
+ if(tradePlan) $('signal').title='Entry '+fmt(tradePlan.entry)+' | SL '+fmt(tradePlan.sl)+' | TP '+fmt(tradePlan.tp);
  drawMap({bars:b,structure:latest,idm:idmPivot,idmState,extremeLiquidity,fvg:fvgZone,ob:obZone,trade:tradePlan});
 }
 
